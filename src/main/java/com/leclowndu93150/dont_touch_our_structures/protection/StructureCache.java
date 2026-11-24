@@ -26,6 +26,7 @@ public class StructureCache {
     private long hits = 0;
     private long misses = 0;
     private long evictions = 0;
+    private int configGeneration = ModConfig.generation();
 
     public StructureCache() {
         this.cache = new LinkedHashMap<>(16, 0.75f, true) {
@@ -49,6 +50,7 @@ public class StructureCache {
         long ttlMillis = ModConfig.cacheTtlSeconds * 1000L;
 
         synchronized (lock) {
+            dropIfConfigChanged();
             CacheEntry entry = cache.get(key);
             if (entry == null) {
                 misses++;
@@ -74,7 +76,17 @@ public class StructureCache {
         CacheKey key = CacheKey.of(dimension, chunkPos);
 
         synchronized (lock) {
+            dropIfConfigChanged();
             cache.put(key, new CacheEntry(result, System.currentTimeMillis()));
+        }
+    }
+
+    /** Results depend on the config, so a config (re)load empties the cache on its next use. Caller holds the lock. */
+    private void dropIfConfigChanged() {
+        int current = ModConfig.generation();
+        if (current != configGeneration) {
+            configGeneration = current;
+            cache.clear();
         }
     }
 

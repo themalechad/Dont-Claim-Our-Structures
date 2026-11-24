@@ -1,3 +1,77 @@
+# moddy2: 2.0.0-opac033-moddy2, config standard
+
+Output jar: `build/libs/dont_touch_our_structures-1.21.1-NeoForge-2.0.0-opac033-moddy2.jar` (`mod_version` in `gradle.properties` is now `2.0.0-opac033-moddy2`).
+
+**Compatibility: no key renames. Existing config files work unchanged.** Config type (COMMON), file name (`config/dont_touch_our_structures-common.toml`), and all 30 key paths, types, defaults and number ranges are the same as upstream 2.0.0, so no migration is needed. `ModConfigSpecTest` pins them.
+On the first boot NeoForge sees the new comments and rewrites the file with them. It keeps a backup copy next to the file, and every value is preserved.
+Protection behaviour and the OPAC mixin are unchanged.
+
+## Config changes (`config/ModConfig.java`)
+- Every option has a new comment, following CODING-GUIDE section 3a. Each one covers:
+  - what the option does, and what changing it does
+  - that existing claims are never removed, since only new claims are blocked
+  - the meaning of 0/empty, and `Default:` for booleans, strings, lists and enums
+  - units in `[in chunks]` / `[in seconds]` form
+  - `Performance:` notes (padding scan size, cache off, debug logging)
+  - `Requires …` links, a copy-paste example for every list and for the padding/message formats, and the meaning of each enum value
+- The first section carries a file header: COMMON, shared by all worlds, no `serverconfig/` copy, live reload, and a pointer to `/dtos check` and `/dtos debug`.
+- Every section (`general`, `structure_types`, `structures`, `dimensions`, `biomes`, `padding`, `messages`, `performance`, `compat`) now has a comment and a translation key. Sections use `push`/`pop`, which gives the same key paths as the old dotted names. Options are ordered from most to least important.
+- `.translation("dont_touch_our_structures.configuration.<section>.<key>")` is set on every option and section. Labels and `.tooltip` entries are in `en_us.json`, and the unused example-mod template entries were removed from it.
+- The comments now document facts about the existing behaviour:
+  - "surface" means terrain adaptation ≠ NONE, so temples, mansions, monuments and end cities count as "underground" and are not protected by default
+  - the biome filter does not apply to padding
+  - the padding scan radius is the largest padding value
+  - the OPAC fallback listener (`opac_use_mixin = false`) can remove existing claims on a whole-region change
+- `structure_types.terrain_adaptations_to_protect` and `structure_types.generation_steps_to_protect` were never read by the protection code, upstream or here. They are kept so existing files stay valid, documented as "not used in this version", and a WARN is logged if they differ from the default. Wiring them in would change protection behaviour, so that is left for a separate decision.
+- Validators:
+  - ids now also reject `""` and an empty path (`"minecraft:"`)
+  - the terrain adaptation and generation step validators are built from the vanilla enums, which adds the missing `ENCAPSULATE` (trial chambers). This only loosens them.
+  - padding entries are parsed without exceptions; accepted inputs are the same as before
+  - number ranges are unchanged (op level 1–4, padding 0–16, cache TTL 10–3600 s, cache size 100–10000)
+- `compat.opac_use_mixin` is now `.worldRestart()`. It was only honoured at server start (listener registration), but the mixin read it live, so a live edit could leave OPAC unprotected until restart. Now the value is held until restart, and a WARN says so if the file changes.
+
+## Reload handling
+- The config is applied on `ModConfigEvent.Loading` and `Reloading` only (it used to run on every `ModConfigEvent`, including Unloading), filtered to this mod's spec.
+- On a file reload while a server is running, the new values are applied on the server thread (`server.execute`), so a claim check never sees half-updated values.
+- **Fix:** the per-chunk `StructureCache` is now invalidated on every config apply, through a generation counter that is checked lazily on the next get/put. Before, editing the file left old results cached for up to `cache_ttl_seconds`; only `/dtos reload` cleared them.
+- One INFO line with a compact effective-config summary is logged on load, reload and `/dtos reload`, for example:
+  `[DTOS] Config loaded: bypassOp=level 2, singleplayer=off, surface=on, underground=off, structures=BLACKLIST(0), dimensions=DISABLED, biomes=DISABLED, padding=off, message=auto, cache=300s/1000, opac=on (mixin), ftbchunks=on, debug=off`
+- Live: everything except `compat.opac_use_mixin` (restart). `compat.opac_enabled` is live with the mixin; in listener mode it needs a restart, as documented.
+
+## Cross-field WARN checks (`config/ConfigChecks.java`)
+Each problem logs one WARN on load and reload. Nothing crashes and the file is never rewritten for these.
+- `protect_surface` and `protect_underground` are both false, so nothing is protected
+- `structures`/`dimensions`/`biomes` in WHITELIST mode with an empty whitelist, stating the effect for each
+- the same id in both the whitelist and the blacklist of a section
+- padding enabled, with `default_chunks = 0` and no custom entry above 0
+- `custom_structure_padding` entries while padding is disabled
+- duplicate structures in `custom_structure_padding` (the last one wins)
+- `terrain_adaptations_to_protect` / `generation_steps_to_protect` changed from the default (they have no effect)
+- unknown `{placeholders}` in `custom_denial_message`
+- no active integration (OPAC/FTB Chunks both missing or disabled)
+- `opac_use_mixin` changed in the file while running (it needs a restart)
+- At server start, and on reload while running: unknown ids, checked against the server registries or level list, with one WARN per list, in:
+  - `structures.whitelist` and `structures.blacklist`
+  - `padding.custom_structure_padding`
+  - `biomes.whitelist` and `biomes.blacklist`
+  - `dimensions.whitelist` and `dimensions.blacklist`
+
+  Padding values above 16 are already dropped by the NeoForge element validator, which logs its own correction.
+
+## Build and tests
+- `build.gradle` adds `mavenCentral()`, JUnit 5.10.2, and a test classpath that reuses main's (plain JUnit, no FML boot).
+- `src/test/.../config/ModConfigSpecTest.java` (7 tests) checks:
+  - exact key paths, defaults and ranges against upstream 2.0.0
+  - that only `opac_use_mixin` is restart-only
+  - that a typical existing server file needs no value correction
+  - that garbage entries are rejected
+  - that every option and section has a translation key, label and tooltip
+
+## Not verified
+The new jar has not been booted on a server here. Still to check: the first-boot comment rewrite and backup, the INFO summary line, and that the WARNs fire as expected.
+
+---
+
 # Don't Claim Our Structures 2.0.0 — OPAC 0.33.0 patch (moddy)
 
 Base: branch `1.21.1`, commit `fa683b3` ("2.0 rewrite"), stock 2.0.0. Version, mod id and all other dependencies are unchanged.

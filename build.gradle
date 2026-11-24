@@ -13,6 +13,7 @@ repositories {
     maven {
         url = "https://cursemaven.com"
     }
+    mavenCentral()
 }
 
 base {
@@ -105,6 +106,20 @@ dependencies {
     implementation "curse.maven:architectury-api-419699:5786327"
     // OPAC NeoForge 1.21.1 0.33.0 (CurseForge file 9221991). compileOnly: OPAC is an optional runtime dependency.
     compileOnly "curse.maven:open-parties-and-claims-636608:9221991"
+
+    // Plain JUnit tests for the config spec (key paths, defaults, validators). No game is started.
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher:1.10.2"
+}
+
+// The tests only build the config spec, so they reuse main's classpath (Minecraft/NeoForge classes) without starting FML.
+configurations {
+    testCompileClasspath.extendsFrom compileClasspath
+    testRuntimeClasspath.extendsFrom runtimeClasspath
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.

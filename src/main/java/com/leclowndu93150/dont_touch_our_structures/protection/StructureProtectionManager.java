@@ -1,6 +1,7 @@
 package com.leclowndu93150.dont_touch_our_structures.protection;
 
 import com.leclowndu93150.dont_touch_our_structures.DontClaimOurStructures;
+import com.leclowndu93150.dont_touch_our_structures.config.ConfigChecks;
 import com.leclowndu93150.dont_touch_our_structures.config.ModConfig;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.core.Holder;
@@ -42,6 +43,7 @@ public class StructureProtectionManager {
     public void init(MinecraftServer server) {
         this.server = server;
         this.cache.clear();
+        ConfigChecks.checkAgainstServer(server);
         debugLog("StructureProtectionManager initialized");
     }
 
@@ -54,6 +56,9 @@ public class StructureProtectionManager {
     public void reload() {
         ModConfig.loadConfig();
         cache.clear();
+        if (server != null) {
+            ConfigChecks.checkAgainstServer(server);
+        }
         debugLog("Configuration reloaded and cache cleared");
     }
 
