@@ -103,7 +103,8 @@ dependencies {
     implementation "curse.maven:ftb-library-forge-404465:6229316"
     implementation "curse.maven:ftb-teams-forge-404468:6119437"
     implementation "curse.maven:architectury-api-419699:5786327"
-    implementation "curse.maven:open-parties-and-claims-636608:6476205"
+    // OPAC NeoForge 1.21.1 0.33.0 (CurseForge file 9221991). compileOnly: OPAC is an optional runtime dependency.
+    compileOnly "curse.maven:open-parties-and-claims-636608:9221991"
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.
