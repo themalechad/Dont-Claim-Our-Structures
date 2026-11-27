@@ -54,6 +54,14 @@ class ModConfigSpecTest {
         UPSTREAM_DEFAULTS.put("compat.opac_use_mixin", true);
     }
 
+    /** Keys added by this fork (moddy3). NeoForge fills them with these defaults in older files. Never rename once shipped. */
+    private static final Map<String, Object> FORK_DEFAULTS = new LinkedHashMap<>();
+
+    static {
+        FORK_DEFAULTS.put("structures.underground_structure_list_mode", ModConfig.FilterMode.WHITELIST);
+        FORK_DEFAULTS.put("structures.underground_structures", List.of());
+    }
+
     private static final Map<String, int[]> UPSTREAM_RANGES = Map.of(
             "general.op_bypass_level", new int[]{1, 4},
             "padding.default_chunks", new int[]{0, 16},
@@ -61,14 +69,23 @@ class ModConfigSpecTest {
             "performance.cache_max_entries", new int[]{100, 10000});
 
     @Test
-    void keyPathsAreExactlyTheUpstreamOnes() {
-        assertEquals(new TreeSet<>(UPSTREAM_DEFAULTS.keySet()), new TreeSet<>(valueSpecs().keySet()));
+    void keyPathsAreExactlyTheUpstreamOnesPlusTheForkOnes() {
+        Set<String> actual = valueSpecs().keySet();
+        for (String upstream : UPSTREAM_DEFAULTS.keySet()) {
+            assertTrue(actual.contains(upstream), "upstream key " + upstream + " still exists");
+        }
+        Set<String> expected = new TreeSet<>(UPSTREAM_DEFAULTS.keySet());
+        expected.addAll(FORK_DEFAULTS.keySet());
+        assertEquals(expected, new TreeSet<>(actual));
     }
 
     @Test
     void defaultsAreUnchanged() {
-        valueSpecs().forEach((path, spec) ->
-                assertEquals(UPSTREAM_DEFAULTS.get(path), spec.getDefault(), "default of " + path));
+        Map<String, ModConfigSpec.ValueSpec> specs = valueSpecs();
+        UPSTREAM_DEFAULTS.forEach((path, value) ->
+                assertEquals(value, specs.get(path).getDefault(), "upstream default of " + path));
+        FORK_DEFAULTS.forEach((path, value) ->
+                assertEquals(value, specs.get(path).getDefault(), "fork default of " + path));
     }
 
     @Test
@@ -90,8 +107,46 @@ class ModConfigSpecTest {
         });
     }
 
+    /** An upstream 2.0.0 / moddy2 file: only the new fork keys may be added (with their defaults); no existing value changes. */
     @Test
     void typicalServerFileNeedsNoValueCorrection() {
+        CommentedConfig file = typicalUpstreamFile();
+        Map<String, Object> before = new TreeMap<>();
+        UPSTREAM_DEFAULTS.keySet().forEach(path -> before.put(path, file.get(path)));
+
+        Set<String> corrected = new TreeSet<>();
+        ModConfig.SPEC.correct(file, (action, path, from, to) -> corrected.add(String.join(".", path)), null);
+
+        assertEquals(new TreeSet<>(FORK_DEFAULTS.keySet()), corrected, "only the new keys are added");
+        before.forEach((path, value) -> assertEquals(value, file.get(path), "value of " + path + " kept"));
+        assertEquals("WHITELIST", String.valueOf(file.<Object>get("structures.underground_structure_list_mode")));
+        assertEquals(List.of(), file.get("structures.underground_structures"));
+    }
+
+    @Test
+    void fileWithTheNewKeysNeedsNoCorrection() {
+        CommentedConfig file = typicalUpstreamFile();
+        file.set("structure_types.protect_underground", true);
+        file.set("structures.underground_structure_list_mode", "WHITELIST");
+        file.set("structures.underground_structures", List.of("minecraft:fortress", "fortress", "iceandfire:fire_dragon_cave"));
+
+        List<String> corrected = new ArrayList<>();
+        ModConfig.SPEC.correct(file, (action, path, from, to) -> corrected.add(String.join(".", path)), null);
+        assertEquals(List.of(), corrected);
+    }
+
+    @Test
+    void badUndergroundEntriesAreCorrected() {
+        CommentedConfig file = typicalUpstreamFile();
+        file.set("structures.underground_structure_list_mode", "WHITELIST");
+        file.set("structures.underground_structures", List.of("minecraft:fortress", "minecraft:", ""));
+
+        Set<String> corrected = new TreeSet<>();
+        ModConfig.SPEC.correct(file, (action, path, from, to) -> corrected.add(String.join(".", path)), null);
+        assertEquals(Set.of("structures.underground_structures"), corrected);
+    }
+
+    private static CommentedConfig typicalUpstreamFile() {
         CommentedConfig file = CommentedConfig.inMemory();
         UPSTREAM_DEFAULTS.forEach(file::set);
         file.set("structures.filter_mode", "WHITELIST");
@@ -102,10 +157,7 @@ class ModConfigSpecTest {
         file.set("padding.custom_structure_padding", List.of("minecraft:village_plains=2", "minecraft:monument=0", "a:b=+3"));
         file.set("structure_types.terrain_adaptations_to_protect", List.of("NONE", "ENCAPSULATE"));
         file.set("messages.custom_denial_message", "No claims near {structure_name}!");
-
-        List<String> corrected = new ArrayList<>();
-        ModConfig.SPEC.correct(file, (action, path, from, to) -> corrected.add(String.join(".", path)), null);
-        assertEquals(List.of(), corrected);
+        return file;
     }
 
     @Test

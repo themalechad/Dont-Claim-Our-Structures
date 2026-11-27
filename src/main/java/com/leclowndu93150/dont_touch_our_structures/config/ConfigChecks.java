@@ -8,6 +8,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.levelgen.structure.Structure;
+import net.minecraft.world.level.levelgen.structure.TerrainAdjustment;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,7 +34,8 @@ public final class ConfigChecks {
     static void checkFields(List<? extends String> rawCustomPadding, boolean opacUseMixinInFile) {
         checkNothingProtected();
         checkFilter("structures", ModConfig.structureFilterMode, ModConfig.structureWhitelist, ModConfig.structureBlacklist,
-                "no structure is protected");
+                "no surface structure is protected");
+        checkUndergroundFilter();
         checkFilter("dimensions", ModConfig.dimensionFilterMode, ModConfig.dimensionWhitelist, ModConfig.dimensionBlacklist,
                 "protection is off in every dimension");
         checkFilter("biomes", ModConfig.biomeFilterMode, ModConfig.biomeWhitelist, ModConfig.biomeBlacklist,
@@ -58,6 +60,8 @@ public final class ConfigChecks {
 
         warnUnknown("structures.whitelist", ModConfig.structureWhitelist, structures::containsKey, "structure");
         warnUnknown("structures.blacklist", ModConfig.structureBlacklist, structures::containsKey, "structure");
+        warnUnknown("structures.underground_structures", ModConfig.undergroundStructures, structures::containsKey, "structure");
+        warnSurfaceOnUndergroundList(structures);
         warnUnknown("padding.custom_structure_padding", ModConfig.customStructurePadding.keySet(), structures::containsKey, "structure");
         warnUnknown("biomes.whitelist", ModConfig.biomeWhitelist, biomes::containsKey, "biome");
         warnUnknown("biomes.blacklist", ModConfig.biomeBlacklist, biomes::containsKey, "biome");
@@ -82,6 +86,30 @@ public final class ConfigChecks {
         if (!both.isEmpty()) {
             warn(section, "has ids in both whitelist and blacklist " + both,
                     "only the list matching filter_mode (" + mode + ") is used");
+        }
+    }
+
+    private static void checkUndergroundFilter() {
+        boolean listEmpty = ModConfig.undergroundStructures.isEmpty();
+        if (!ModConfig.protectUndergroundStructures) {
+            if (!listEmpty) {
+                warn("structures.underground_structures", "has entries but structure_types.protect_underground = false",
+                        "the list is ignored and no underground structure is protected");
+            }
+            return;
+        }
+        if (ModConfig.undergroundStructureListMode == ModConfig.FilterMode.WHITELIST && listEmpty) {
+            warn("structures.underground_structures", "is empty while structures.underground_structure_list_mode = WHITELIST"
+                    + " and structure_types.protect_underground = true", "no underground structure is protected");
+        }
+        boolean globalListInUse = switch (ModConfig.structureFilterMode) {
+            case WHITELIST -> !ModConfig.structureWhitelist.isEmpty();
+            case BLACKLIST -> !ModConfig.structureBlacklist.isEmpty();
+            case DISABLED -> false;
+        };
+        if (globalListInUse) {
+            warn("structures.filter_mode/whitelist/blacklist", "are set while structure_types.protect_underground = true",
+                    "they apply to surface structures only; underground ones use underground_structure_list_mode/underground_structures");
         }
     }
 
@@ -139,6 +167,20 @@ public final class ConfigChecks {
         if (!opacActive && !ftbActive) {
             warn("compat", "has no active integration (Open Parties and Claims / FTB Chunks missing or disabled)",
                     "no claim is blocked");
+        }
+    }
+
+    /** Surface ids on the underground list never match; they are protected (or not) by protect_surface and the global lists. */
+    private static void warnSurfaceOnUndergroundList(Registry<Structure> structures) {
+        Set<ResourceLocation> surface = ModConfig.undergroundStructures.stream()
+                .filter(id -> {
+                    Structure structure = structures.get(id);
+                    return structure != null && structure.terrainAdaptation() != TerrainAdjustment.NONE;
+                })
+                .collect(Collectors.toCollection(TreeSet::new));
+        if (!surface.isEmpty()) {
+            warn("structures.underground_structures", "has surface structure ids " + surface,
+                    "they are ignored here; surface structures follow protect_surface and structures.filter_mode");
         }
     }
 

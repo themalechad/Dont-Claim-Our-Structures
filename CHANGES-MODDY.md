@@ -1,3 +1,51 @@
+# moddy3: 2.0.0-opac033-moddy3, separate underground structure list
+
+Output jar: `build/libs/dont_touch_our_structures-1.21.1-NeoForge-2.0.0-opac033-moddy3.jar` (`mod_version` in `gradle.properties` is now `2.0.0-opac033-moddy3`).
+
+**Compatibility: no key renames.** All moddy2 keys keep their paths, types and defaults. Two keys are added to `[structures]`. Old files are filled with the defaults on first boot, and NeoForge keeps a backup.
+
+## New config keys (`config/ModConfig.java`)
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `structures.underground_structure_list_mode` | `WHITELIST` / `BLACKLIST` / `DISABLED` | `WHITELIST` | `WHITELIST`: only listed underground ids are protected. `BLACKLIST`: every underground structure except the listed ones is protected. `DISABLED`: the list is ignored and every underground structure is protected. |
+| `structures.underground_structures` | list of structure ids | `[]` (empty) | The ids used by the mode above. Exact match, no wildcards. |
+
+- `structure_types.protect_underground` stays the master switch (default `false`). While it is `false`, both new keys are ignored and no underground structure is protected, so **a default config behaves exactly as moddy2**.
+- The 63 Boogaloo ids are **not** in the default config. They are only in the docs file (see below).
+
+## Independent surface and underground filters
+- "Surface" still means terrain adaptation ≠ `NONE`; "underground" means `NONE`. The classification is unchanged.
+- Surface structures use only `protect_surface` and the global `structures.filter_mode` / `whitelist` / `blacklist`.
+- Underground structures use only `protect_underground` and the new `underground_structure_list_mode` / `underground_structures`. The global lists no longer affect them, and the new list cannot affect surface structures.
+- **Behaviour change (only when `protect_underground = true`):** in moddy2 underground structures also went through the global filter. With the new default (`WHITELIST`, empty list), no underground structure is protected until you fill the list. To get the old "protect all underground" result, set `underground_structure_list_mode = "DISABLED"` (or `BLACKLIST` with an empty list).
+- The logic lives in the new `config/StructureFilter.java`, an immutable snapshot rebuilt on every config apply. `StructureProtectionManager` calls it, so the OPAC mixin, the OPAC fallback listener and FTB Chunks all share the same decision. Padding and the biome/dimension filters are unchanged.
+- `/dtos info` now shows `Filter: protected` / `not protected` for each structure in the chunk (structure type and id filter only; `/dtos check` still gives the full verdict).
+
+## Checks, reload and the INFO line (`config/ConfigChecks.java`)
+New WARNs, one each on load and reload, never fatal and never rewriting the file:
+- `underground_structures` has entries but `protect_underground = false` (the list is ignored)
+- `protect_underground = true` with `WHITELIST` mode and an empty list (no underground structure is protected)
+- `protect_underground = true` while the global `structures` lists are in use (they apply to surface structures only now)
+- At server start and on reload while running: unknown ids in `structures.underground_structures`, and surface ids on that list (they never match there; a WARN lists them)
+
+The global-filter empty-whitelist WARN now says "no surface structure is protected".
+Both new keys are live: they apply on file save or `/dtos reload`, with the same server-thread apply and cache invalidation as moddy2.
+The INFO summary line gains `undergroundFilter=<MODE>(<count>)`, for example `..., structures=BLACKLIST(0), undergroundFilter=WHITELIST(63), ...`.
+
+## Docs
+- New `UNDERGROUND-STRUCTURES.md`: how the two categories and filters work, the list modes, and a ready-to-paste Boogaloo block with the 63-id underground whitelist, plus warnings not to enable `protect_underground` without it and not to add surface ids.
+- `en_us.json`: labels and tooltips for the two new keys, and updated tooltips for `protect_underground` and the global `structures` filter.
+
+## Tests
+- New `StructureFilterTest` (11 tests): defaults, each underground mode (WHITELIST, empty WHITELIST, BLACKLIST, DISABLED), the `protect_underground` / `protect_surface` switches, both directions of surface/underground independence, and ids without a namespace resolving to `minecraft`.
+- `ModConfigSpecTest` (9 tests, was 7): pins the new key paths and defaults, checks that a file with the new keys needs no correction and that bad underground entries are corrected, and checks that the new keys have translation keys, labels and tooltips.
+- 20 tests in total, all passing with `gradlew.bat test build` on JDK 21.
+
+## Not verified
+The moddy3 jar has not been booted on a server here. Still to check: the two new keys appear in the rewritten file, the `undergroundFilter=` INFO field, the new WARNs, and that a whitelisted underground structure blocks claims through OPAC and FTB Chunks while a non-listed one does not.
+
+---
+
 # moddy2: 2.0.0-opac033-moddy2, config standard
 
 Output jar: `build/libs/dont_touch_our_structures-1.21.1-NeoForge-2.0.0-opac033-moddy2.jar` (`mod_version` in `gradle.properties` is now `2.0.0-opac033-moddy2`).

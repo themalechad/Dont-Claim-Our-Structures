@@ -165,29 +165,10 @@ public class StructureProtectionManager {
         return ProtectionResult.allowed();
     }
 
-    private boolean isStructureProtected(Structure structure, ResourceLocation structureId) {
+    /** Surface = terrain adaptation other than NONE; the per-category filters live in {@link com.leclowndu93150.dont_touch_our_structures.config.StructureFilter}. */
+    private static boolean isStructureProtected(Structure structure, ResourceLocation structureId) {
         boolean isSurface = structure.terrainAdaptation() != TerrainAdjustment.NONE;
-
-        if (isSurface && !ModConfig.protectSurfaceStructures) {
-            return false;
-        }
-        if (!isSurface && !ModConfig.protectUndergroundStructures) {
-            return false;
-        }
-
-        switch (ModConfig.structureFilterMode) {
-            case WHITELIST -> {
-                return ModConfig.structureWhitelist.contains(structureId);
-            }
-            case BLACKLIST -> {
-                return !ModConfig.structureBlacklist.contains(structureId);
-            }
-            case DISABLED -> {
-                return true;
-            }
-        }
-
-        return false;
+        return ModConfig.structureFilter.isProtected(structureId, isSurface);
     }
 
     private boolean checkBiomeFilter(ServerLevel level, ChunkPos chunkPos) {

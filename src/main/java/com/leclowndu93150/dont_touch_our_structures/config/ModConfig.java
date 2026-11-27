@@ -21,7 +21,8 @@ import java.util.stream.Collectors;
 /**
  * COMMON config, file {@code config/dont_touch_our_structures-common.toml}.
  * <p>
- * Every key path, type and default is unchanged from upstream 2.0.0 so existing files keep working.
+ * Every key path, type and default is unchanged from upstream 2.0.0 so existing files keep working. moddy3 only adds
+ * {@code structures.underground_structure_list_mode} and {@code structures.underground_structures} (filled with their defaults in old files).
  * Values are copied into the static fields below on load/reload (on the server thread when a server is running);
  * hot paths read those fields, and derived caches watch {@link #generation()}.
  */
@@ -102,7 +103,10 @@ public class ModConfig {
 
     private static final ModConfigSpec.BooleanValue PROTECT_UNDERGROUND_STRUCTURES = BUILDER
             .comment("Protects underground structures (terrain adaptation NONE), which includes many above-ground vanilla ones such as temples and mansions.",
+                    "Which underground structures count is chosen by \"structures.underground_structure_list_mode\" and \"structures.underground_structures\"",
+                    "(by default that is an empty WHITELIST, so turning this on alone protects none of them; fill the list first).",
                     "Turning it on blocks claims over much larger areas (mineshafts and fortresses span many chunks); existing claims are kept.",
+                    "false = no underground structure is protected and the underground list is ignored.",
                     "Default: false")
             .translation(KEY + "structure_types.protect_underground")
             .define("protect_underground", false);
@@ -131,23 +135,26 @@ public class ModConfig {
     static {
         BUILDER.pop()
                 .comment("Filter by structure id, applied after structure_types. Ids are exact (no wildcards); a missing namespace means minecraft.",
-                        "Use /dtos debug to see the ids of the structures in a chunk.")
+                        "filter_mode/whitelist/blacklist apply to surface structures only; underground_structure_list_mode/underground_structures",
+                        "apply to underground structures only. Neither pair can change the other category.",
+                        "Use /dtos debug to see the ids and terrain adaptation of the structures in a chunk.")
                 .translation(KEY + "structures")
                 .push("structures");
     }
 
     private static final ModConfigSpec.EnumValue<FilterMode> STRUCTURE_FILTER_MODE = BUILDER
-            .comment("How structures.whitelist and structures.blacklist are used.",
-                    "WHITELIST = only structures in the whitelist are protected (an empty whitelist protects nothing).",
-                    "BLACKLIST = every structure is protected except those in the blacklist.",
-                    "DISABLED = both lists are ignored; every structure allowed by structure_types is protected.",
+            .comment("How structures.whitelist and structures.blacklist are used, for surface structures only.",
+                    "WHITELIST = only surface structures in the whitelist are protected (an empty whitelist protects no surface structure).",
+                    "BLACKLIST = every surface structure is protected except those in the blacklist.",
+                    "DISABLED = both lists are ignored; every surface structure is protected when protect_surface = true.",
+                    "Underground structures ignore this option; they use underground_structure_list_mode.",
                     "Changing the mode only affects new claims.",
                     "Default: BLACKLIST")
             .translation(KEY + "structures.filter_mode")
             .defineEnum("filter_mode", FilterMode.BLACKLIST);
 
     private static final ModConfigSpec.ConfigValue<List<? extends String>> STRUCTURE_WHITELIST = BUILDER
-            .comment("Structures to protect. Requires filter_mode = WHITELIST (ignored otherwise).",
+            .comment("Surface structures to protect. Requires filter_mode = WHITELIST (ignored otherwise). Underground ids here have no effect.",
                     "Removing an entry allows new claims on that structure; it does not unclaim anything.",
                     "Example: [\"minecraft:village_plains\", \"minecraft:pillager_outpost\"]",
                     "Default: []")
@@ -155,12 +162,36 @@ public class ModConfig {
             .defineListAllowEmpty("whitelist", List.of(), ModConfig::isResourceLocation);
 
     private static final ModConfigSpec.ConfigValue<List<? extends String>> STRUCTURE_BLACKLIST = BUILDER
-            .comment("Structures that are never protected. Requires filter_mode = BLACKLIST (ignored otherwise).",
+            .comment("Surface structures that are never protected. Requires filter_mode = BLACKLIST (ignored otherwise). Underground ids here have no effect.",
                     "Adding an entry allows new claims on that structure; removing one does not unclaim anything.",
                     "Example: [\"minecraft:trail_ruins\", \"minecraft:pillager_outpost\"]",
                     "Default: []")
             .translation(KEY + "structures.blacklist")
             .defineListAllowEmpty("blacklist", List.of(), ModConfig::isResourceLocation);
+
+    private static final ModConfigSpec.EnumValue<FilterMode> UNDERGROUND_STRUCTURE_LIST_MODE = BUILDER
+            .comment("How underground_structures is used, for underground structures (terrain adaptation NONE) only.",
+                    "WHITELIST = only underground structures in the list are protected (an empty list protects none of them).",
+                    "BLACKLIST = every underground structure is protected except those in the list (an empty list protects all of them).",
+                    "DISABLED = the list is ignored; every underground structure is protected.",
+                    "Requires structure_types.protect_underground = true (ignored otherwise). Surface structures ignore this option.",
+                    "Changing the mode only affects new claims; existing claims are never removed.",
+                    "Takes effect after saving the file or /dtos reload.",
+                    "Default: WHITELIST")
+            .translation(KEY + "structures.underground_structure_list_mode")
+            .defineEnum("underground_structure_list_mode", FilterMode.WHITELIST);
+
+    private static final ModConfigSpec.ConfigValue<List<? extends String>> UNDERGROUND_STRUCTURES = BUILDER
+            .comment("Underground structure ids for underground_structure_list_mode: the ones to protect in WHITELIST mode,",
+                    "or the ones never protected in BLACKLIST mode. Empty = none protected (WHITELIST) or all protected (BLACKLIST).",
+                    "Requires structure_types.protect_underground = true (ignored otherwise).",
+                    "Surface structure ids here have no effect (they are protected by protect_surface and the global lists above).",
+                    "Removing an entry in WHITELIST mode allows new claims on that structure; it never unclaims anything.",
+                    "Takes effect after saving the file or /dtos reload.",
+                    "Example: [\"minecraft:fortress\", \"minecraft:mansion\", \"minecraft:monument\"]",
+                    "Default: []")
+            .translation(KEY + "structures.underground_structures")
+            .defineListAllowEmpty("underground_structures", List.of(), ModConfig::isResourceLocation);
 
     // ---------------------------------------------------------------- dimensions
     static {
@@ -386,6 +417,10 @@ public class ModConfig {
     public static volatile FilterMode structureFilterMode = FilterMode.BLACKLIST;
     public static volatile Set<ResourceLocation> structureWhitelist = Set.of();
     public static volatile Set<ResourceLocation> structureBlacklist = Set.of();
+    public static volatile FilterMode undergroundStructureListMode = FilterMode.WHITELIST;
+    public static volatile Set<ResourceLocation> undergroundStructures = Set.of();
+    /** Snapshot of the structure_types and structures values above, published in one write; the protection code reads only this. */
+    public static volatile StructureFilter structureFilter = StructureFilter.DEFAULTS;
 
     public static volatile FilterMode dimensionFilterMode = FilterMode.DISABLED;
     public static volatile Set<ResourceLocation> dimensionWhitelist = Set.of();
@@ -521,6 +556,11 @@ public class ModConfig {
         structureFilterMode = STRUCTURE_FILTER_MODE.get();
         structureWhitelist = toIds(STRUCTURE_WHITELIST.get());
         structureBlacklist = toIds(STRUCTURE_BLACKLIST.get());
+        undergroundStructureListMode = UNDERGROUND_STRUCTURE_LIST_MODE.get();
+        undergroundStructures = toIds(UNDERGROUND_STRUCTURES.get());
+        structureFilter = new StructureFilter(protectSurfaceStructures, protectUndergroundStructures,
+                structureFilterMode, structureWhitelist, structureBlacklist,
+                undergroundStructureListMode, undergroundStructures);
 
         dimensionFilterMode = DIMENSION_FILTER_MODE.get();
         dimensionWhitelist = toIds(DIMENSION_WHITELIST.get());
@@ -553,7 +593,7 @@ public class ModConfig {
         LOGGER.info("[DTOS] Config {}: {}", reason, summary());
     }
 
-    private static Set<ResourceLocation> toIds(List<? extends String> entries) {
+    static Set<ResourceLocation> toIds(List<? extends String> entries) {
         return entries.stream()
                 .map(ModConfig::parseId)
                 .filter(Objects::nonNull)
@@ -583,6 +623,8 @@ public class ModConfig {
                 + ", surface=" + onOff(protectSurfaceStructures)
                 + ", underground=" + onOff(protectUndergroundStructures)
                 + ", structures=" + filter(structureFilterMode, structureWhitelist, structureBlacklist)
+                + ", undergroundFilter=" + filter(undergroundStructureListMode, undergroundStructures, undergroundStructures)
+                + (protectUndergroundStructures ? "" : " (ignored)")
                 + ", dimensions=" + filter(dimensionFilterMode, dimensionWhitelist, dimensionBlacklist)
                 + ", biomes=" + filter(biomeFilterMode, biomeWhitelist, biomeBlacklist)
                 + ", padding=" + (enablePadding ? defaultPaddingChunks + " chunks (+" + customStructurePadding.size() + " custom)" : "off")

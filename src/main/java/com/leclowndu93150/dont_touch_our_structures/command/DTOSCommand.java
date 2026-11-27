@@ -1,5 +1,6 @@
 package com.leclowndu93150.dont_touch_our_structures.command;
 
+import com.leclowndu93150.dont_touch_our_structures.config.ModConfig;
 import com.leclowndu93150.dont_touch_our_structures.protection.ProtectionResult;
 import com.leclowndu93150.dont_touch_our_structures.protection.StructureCache;
 import com.leclowndu93150.dont_touch_our_structures.protection.StructureInfo;
@@ -147,12 +148,22 @@ public class DTOSCommand {
                         .append(Component.literal(info.terrainAdaptation().name()).withStyle(ChatFormatting.AQUA))
                         .append(Component.literal(" | Step: ").withStyle(ChatFormatting.DARK_GRAY))
                         .append(Component.literal(info.generationStep()).withStyle(ChatFormatting.AQUA))
+                        .append(Component.literal(" | Filter: ").withStyle(ChatFormatting.DARK_GRAY))
+                        .append(filterVerdict(info))
                         .append("\n");
             }
         }
 
         source.sendSuccess(() -> message, false);
         return 1;
+    }
+
+    /** Structure type + id filter only; the biome filter, padding and op bypass are shown by /dtos check. */
+    private static Component filterVerdict(StructureInfo info) {
+        boolean protectedById = ModConfig.structureFilter.isProtected(info.structureId(), info.isSurface());
+        return protectedById
+                ? Component.literal("protected").withStyle(ChatFormatting.RED)
+                : Component.literal("not protected").withStyle(ChatFormatting.GREEN);
     }
 
     private static int clearCache(CommandContext<CommandSourceStack> context) {
